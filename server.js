@@ -1,138 +1,99 @@
+// server.js
 import express from "express";
-import cors from "cors";
 import bodyParser from "body-parser";
-import pkg from "pg";
+import cors from "cors";
+import { pool } from "./db.js";
 
-const { Pool } = pkg;
 const app = express();
-const PORT = process.env.PORT || 8080;
-
-// PostgreSQL connection (Render gives DATABASE_URL)
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
-
-// Middlewares
 app.use(cors());
 app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
 
-// Helper to generate conversation key
-function generateConvKey() {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  return Array.from({ length: 6 })
-    .map(() => chars[Math.floor(Math.random() * chars.length)])
-    .join("");
-}
-
-// --- ROUTES ---
-
-// Create conversation
-app.post("/api/conversations", async (req, res) => {
+// ✅ Create a conversation
+app.post("/api/createConversation", async (req, res) => {
   try {
     const { trainer, associate } = req.body;
-    const convKey = generateConvKey();
+    const key = Math.random().toString(36).substring(2, 8).toUpperCase();
 
     await pool.query(
-      `INSERT INTO conversations (key, trainer, associate, start_time, ended)
-       VALUES ($1, $2, $3, NOW(), false)`,
-      [convKey, trainer, associate]
+      "INSERT INTO conversations (conv_key, trainer_name, associate_name, start_time, ended) VALUES ($1,$2,$3,NOW(),FALSE)",
+      [key, trainer, associate]
     );
 
-    res.json({ key: convKey });
+    res.json({ key });
   } catch (err) {
-    console.error("createConversation error:", err);
+    console.error(err);
     res.status(500).json({ error: "Failed to create conversation" });
   }
 });
 
-// Get user role and conversation details
-app.get("/api/conversations/:key", async (req, res) => {
+// ✅ Get all messages
+app.get("/api/getMessages", async (req, res) => {
   try {
-    const { key } = req.params;
-    const { name } = req.query;
-
+    const { key } = req.query;
     const result = await pool.query(
-      `SELECT * FROM conversations WHERE key = $1`,
-      [key]
-    );
-
-    if (result.rowCount === 0) return res.status(404).json({ error: "Not found" });
-    const conv = result.rows[0];
-    if (conv.ended) return res.json({ error: "Conversation ended" });
-
-    const lower = name.toLowerCase();
-    let role = null;
-    if (conv.trainer.toLowerCase() === lower) role = "trainer";
-    else if (conv.associate.toLowerCase() === lower) role = "associate";
-    else return res.status(403).json({ error: "Not a participant" });
-
-    res.json({
-      role,
-      trainerName: conv.trainer,
-      associateName: conv.associate,
-      startTime: conv.start_time,
-      convKey: conv.key,
-    });
-  } catch (err) {
-    console.error("getUserRole error:", err);
-    res.status(500).json({ error: "Server error" });
-  }
-});
-
-// Send message
-app.post("/api/messages", async (req, res) => {
-  try {
-    const { key, sender, role, text } = req.body;
-
-    const conv = await pool.query(`SELECT ended FROM conversations WHERE key=$1`, [key]);
-    if (conv.rowCount === 0) return res.status(404).json({ error: "Conversation not found" });
-    if (conv.rows[0].ended) return res.status(400).json({ error: "Conversation ended" });
-
-    await pool.query(
-      `INSERT INTO messages (conv_key, timestamp, sender, role, text)
-       VALUES ($1, NOW(), $2, $3, $4)`,
-      [key, sender, role, text]
-    );
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("sendMessage error:", err);
-    res.status(500).json({ error: "Failed to send message" });
-  }
-});
-
-// Get all messages
-app.get("/api/messages/:key", async (req, res) => {
-  try {
-    const { key } = req.params;
-    const result = await pool.query(
-      `SELECT * FROM messages WHERE conv_key=$1 ORDER BY timestamp ASC`,
+      "SELECT timestamp, sender, role, message FROM messages WHERE conv_key=$1 ORDER BY timestamp ASC",
       [key]
     );
     res.json(result.rows);
   } catch (err) {
-    console.error("getMessages error:", err);
+    console.error(err);
     res.status(500).json({ error: "Failed to fetch messages" });
   }
 });
 
-// End conversation
-app.post("/api/conversations/:key/end", async (req, res) => {
+// ✅ Send message
+app.post("/api/sendMessage", async (req, res) => {
   try {
-    const { key } = req.params;
+    const { key, sender, role, text } = req.body;
     await pool.query(
-      `UPDATE conversations SET ended=true, end_time=NOW() WHERE key=$1`,
-      [key]
+      "INSERT INTO messages (conv_key, timestamp, sender, role, message) VALUES ($1,NOW(),$2,$3,$4)",
+      [key, sender, role, text]
     );
     res.json({ success: true });
   } catch (err) {
-    console.error("endConversation error:", err);
+    console.error(err);
+    res.status(500).json({ error: "Failed to send message" });
+  }
+});
+
+// ✅ Get role info
+app.get("/api/getUserRoleAndStartTime", async (req, res) => {
+  try {
+    const { key, name } = req.query;
+    const conv = await pool.query("SELECT * FROM conversations WHERE conv_key=$1", [key]);
+    if (conv.rowCount === 0) return res.json(null);
+
+    const c = conv.rows[0];
+    if (c.ended) return res.json(null);
+
+    let role = null;
+    if (c.trainer_name.toLowerCase() === name.toLowerCase()) role = "trainer";
+    else if (c.associate_name.toLowerCase() === name.toLowerCase()) role = "associate";
+    else return res.json(null);
+
+    res.json({
+      role,
+      trainerName: c.trainer_name,
+      associateName: c.associate_name,
+      startTime: c.start_time,
+      convKey: key
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch conversation info" });
+  }
+});
+
+// ✅ End conversation
+app.post("/api/endConversation", async (req, res) => {
+  try {
+    const { key } = req.body;
+    await pool.query("UPDATE conversations SET ended=TRUE, end_time=NOW() WHERE conv_key=$1", [key]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Failed to end conversation" });
   }
 });
 
-app.get("/", (_, res) => res.send("✅ Mock Chat API running"));
-
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(3000, () => console.log("✅ Server running on port 3000"));
