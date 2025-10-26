@@ -2,7 +2,7 @@
 import PDFDocument from "pdfkit";
 import getStream from "get-stream"; // we will include small get-stream utility inline if needed
 
-import { DB } from "../store";
+import { DB } from "../memoryStore";
 
 function sendJson(res, status, payload) {
   res.setHeader("Access-Control-Allow-Origin", "*");
