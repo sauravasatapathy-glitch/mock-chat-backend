@@ -1,27 +1,35 @@
-// /api/messages.js
 const pool = require('../db.js');
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   try {
-    if (req.method === 'GET') {
-      const { conversationId } = req.query;
-      const result = await pool.query(
-        'SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
-        [conversationId]
+    if (req.method === 'POST') {
+      const { convKey, senderName, senderRole, message } = req.body;
+      if (!convKey || !senderName || !message) {
+        return res.status(400).json({ error: 'Missing required fields' });
+      }
+
+      await pool.query(
+        `INSERT INTO messages (conv_key, sender_name, sender_role, message, timestamp)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        [convKey, senderName, senderRole, message]
       );
-      res.status(200).json(result.rows);
-    } else if (req.method === 'POST') {
-      const { conversationId, sender, content } = req.body;
-      const result = await pool.query(
-        'INSERT INTO messages (conversation_id, sender, content) VALUES ($1, $2, $3) RETURNING *',
-        [conversationId, sender, content]
-      );
-      res.status(201).json(result.rows[0]);
-    } else {
-      res.status(405).json({ error: 'Method not allowed' });
+
+      return res.status(200).json({ success: true });
     }
+
+    if (req.method === 'GET') {
+      const { convKey } = req.query;
+      const result = await pool.query(
+        'SELECT * FROM messages WHERE conv_key = $1 ORDER BY timestamp ASC',
+        [convKey]
+      );
+
+      return res.status(200).json(result.rows);
+    }
+
+    return res.status(405).json({ error: 'Method not allowed' });
   } catch (err) {
-    console.error('DB error:', err);
-    res.status(500).json({ error: err.message });
+    console.error('Error in /api/messages:', err);
+    return res.status(500).json({ error: 'Internal Server Error', details: err.message });
   }
-}
+};
