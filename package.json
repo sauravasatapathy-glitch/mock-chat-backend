@@ -1,8 +1,12 @@
 {
   "name": "mock-chat-backend",
+  "version": "1.0.0",
   "type": "module",
+  "main": "api/conversation.js",
+  "scripts": {
+    "start": "node api/conversation.js"
+  },
   "dependencies": {
-    "pg": "^8.11.3",
-    "pdfkit": "^0.13.0"
+    "pg": "^8.11.3"
   }
 }
