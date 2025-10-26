@@ -1,5 +1,5 @@
 // api/typing.js
-import { DB } from "./store";
+import { DB } from "../store";
 
 function sendJson(res, status, payload) {
   res.setHeader("Access-Control-Allow-Origin", "*");
