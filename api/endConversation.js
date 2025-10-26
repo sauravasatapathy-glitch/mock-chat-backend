@@ -12,8 +12,9 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Update the conversation using your actual column names
     const result = await db.query(
-      'UPDATE conversations SET ended = TRUE, ended_at = NOW() WHERE conv_key = $1 RETURNING *',
+      'UPDATE conversations SET ended = TRUE, end_time = NOW() WHERE conv_key = $1 RETURNING *',
       [convKey]
     );
 
@@ -21,7 +22,10 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
-    res.status(200).json({ message: 'Conversation ended successfully', conversation: result.rows[0] });
+    res.status(200).json({
+      message: 'Conversation ended successfully',
+      conversation: result.rows[0],
+    });
   } catch (err) {
     console.error('Error ending conversation:', err.message);
     res.status(500).json({ error: 'Internal Server Error', details: err.message });
