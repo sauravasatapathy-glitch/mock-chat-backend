@@ -29,8 +29,8 @@ export default async function handler(req, res) {
     }
 
     res.status(405).json({ error: 'Method not allowed' });
-  } catch (err) {
-    console.error('Error in /api/conversation:', err);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
+} catch (err) {
+  console.error('Error in /api/conversation:', err.message, err.stack);
+  res.status(500).json({ error: err.message });
+}
 }
