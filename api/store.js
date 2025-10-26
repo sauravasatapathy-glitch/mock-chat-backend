@@ -1,6 +1,6 @@
-const pool = require('../db.js');
+import pool from '../db.js';
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   try {
     if (req.method === 'POST') {
       const { trainerName, associateName } = req.body;
@@ -38,4 +38,4 @@ module.exports = async function handler(req, res) {
     console.error('Error in /api/store:', err);
     return res.status(500).json({ error: 'Internal Server Error', details: err.message });
   }
-};
+}
