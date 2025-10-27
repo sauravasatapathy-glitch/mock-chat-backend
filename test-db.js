@@ -1,11 +1,23 @@
-import pool from '../../db.js';
+import pkg from 'pg';
+const { Pool } = pkg;
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
 export default async function handler(req, res) {
   try {
-    const result = await pool.query('SELECT NOW()');
-    res.status(200).json({ status: 'ok', time: result.rows[0].now });
+    const client = await pool.connect();
+    const result = await client.query('SELECT NOW()');
+    client.release();
+
+    return res.status(200).json({
+      status: 'ok',
+      time: result.rows[0].now,
+    });
   } catch (err) {
     console.error('DB connection error:', err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 }
