@@ -24,11 +24,11 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Missing required fields' });
       }
 
-      await pool.query(
-        `INSERT INTO messages (conv_key, sender_name, sender_role, message, timestamp)
-         VALUES ($1, $2, $3, $4, NOW())`,
-        [convKey, senderName, senderRole, message]
-      );
+    await pool.query(
+      `INSERT INTO messages (conv_key, sender_name, role, text, timestamp)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [convKey, senderName, senderRole, message]
+    );
 
       return res.status(200).json({ success: true });
     }
