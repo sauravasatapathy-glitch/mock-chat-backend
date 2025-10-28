@@ -13,15 +13,22 @@ export default async function handler(req, res) {
 
   try {
     const { email, password } = req.body;
+    console.log("Incoming login:", email);
+
     if (!email || !password)
       return res.status(400).json({ error: "Missing credentials" });
 
     const result = await pool.query(`SELECT * FROM users WHERE email = $1`, [email]);
-    const user = result.rows[0];
+    console.log("Query successful, result:", result.rows);
 
-    if (!user) return res.status(401).json({ error: "User not found" });
+    if (!result.rows.length) return res.status(401).json({ error: "User not found" });
+
+    const user = result.rows[0];
+    console.log("User found:", user);
 
     const valid = await bcrypt.compare(password, user.password_hash);
+    console.log("Password valid?", valid);
+
     if (!valid) return res.status(401).json({ error: "Invalid password" });
 
     const token = jwt.sign(
@@ -36,7 +43,7 @@ export default async function handler(req, res) {
       user: { id: user.id, name: user.name, role: user.role, email: user.email },
     });
   } catch (err) {
-    console.error("Login Error:", err);
+    console.error("Login Error:", err.stack);
     res.status(500).json({ error: err.message });
   }
 }
