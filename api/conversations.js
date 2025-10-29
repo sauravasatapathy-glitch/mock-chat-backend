@@ -1,61 +1,69 @@
-// api/conversations.js
 import pool from "../db.js";
+import { verifyToken, requireRole } from "../lib/auth.js";
 
 export default async function handler(req, res) {
-  // CORS + preflight
+  // Enable CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  const path = req.url.split("?")[0];
-
   try {
-    // Create conversation: POST /api/conversations/create
-    if (path.endsWith("/create") && req.method === "POST") {
-      const { trainerName, associateName, createdBy } = req.body || {};
-      if (!trainerName || !associateName) return res.status(400).json({ error: "Missing fields" });
+    if (req.method === "POST") {
+      await verifyToken(req, res, async () => {
+        const { trainerName, associateName } = req.body;
+        const { name: creatorName } = req.user; // extracted from token
 
-      const convKey = Math.random().toString(36).substring(2, 8).toUpperCase();
-      const q =
-        "INSERT INTO conversations (conv_key, trainer_name, associate_name, start_time, ended, created_by) VALUES ($1,$2,$3,NOW(),FALSE,$4) RETURNING *";
-      const r = await pool.query(q, [convKey, trainerName, associateName, createdBy || null]);
+        if (!trainerName || !associateName)
+          return res.status(400).json({ error: "Missing required fields" });
 
-      return res.status(200).json({ success: true, convKey, conversation: r.rows[0] });
+        const convKey = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+        const result = await pool.query(
+          `INSERT INTO conversations (conv_key, trainer_name, associate_name, start_time, ended, created_by)
+           VALUES ($1, $2, $3, NOW(), false, $4)
+           RETURNING *`,
+          [convKey, trainerName, associateName, creatorName]
+        );
+
+        return res.status(200).json({
+          success: true,
+          convKey,
+          conversation: result.rows[0],
+        });
+      });
     }
 
-    // Get conversation by key: GET /api/conversations/get?convKey=XXX
-    if (path.endsWith("/get") && req.method === "GET") {
-      const { convKey } = req.query || {};
-      if (!convKey) return res.status(400).json({ error: "Missing convKey" });
-      const r = await pool.query("SELECT * FROM conversations WHERE conv_key = $1", [convKey]);
-      if (r.rows.length === 0) return res.status(404).json({ error: "Conversation not found" });
-      return res.status(200).json(r.rows[0]);
-    }
+    else if (req.method === "GET") {
+      const { convKey, all } = req.query;
 
-    // Active conversations (optionally by owner): GET /api/conversations/active?createdBy=abc
-    if (path.endsWith("/active") && req.method === "GET") {
-      const { createdBy } = req.query || {};
-      let r;
-      if (createdBy) {
-        r = await pool.query("SELECT * FROM conversations WHERE ended = FALSE AND created_by = $1 ORDER BY start_time DESC", [createdBy]);
-      } else {
-        r = await pool.query("SELECT * FROM conversations WHERE ended = FALSE ORDER BY start_time DESC");
+      // ✅ If “all” flag passed, return all conversations (merged route)
+      if (all === "true") {
+        const result = await pool.query(
+          "SELECT * FROM conversations ORDER BY start_time DESC"
+        );
+        return res.status(200).json(result.rows);
       }
-      return res.status(200).json(r.rows);
+
+      // ✅ Otherwise fetch a single conversation by key
+      const result = await pool.query(
+        "SELECT * FROM conversations WHERE conv_key = $1",
+        [convKey]
+      );
+
+      if (result.rows.length === 0)
+        return res.status(404).json({ error: "Conversation not found" });
+
+      return res.status(200).json(result.rows[0]);
     }
 
-    // End conversation: POST /api/conversations/end
-    if (path.endsWith("/end") && req.method === "POST") {
-      const { convKey } = req.body || {};
-      if (!convKey) return res.status(400).json({ error: "Missing convKey" });
-      await pool.query("UPDATE conversations SET ended = TRUE, end_time = NOW() WHERE conv_key = $1", [convKey]);
-      return res.status(200).json({ success: true });
+    else {
+      res.status(405).json({ error: "Method not allowed" });
     }
 
-    return res.status(404).json({ error: "Invalid conversations endpoint" });
   } catch (err) {
     console.error("Error in /api/conversations:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal Server Error", details: err.message });
   }
 }
