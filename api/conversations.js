@@ -1,3 +1,6 @@
+import fs from "fs";
+console.log("✅ Auth exists:", fs.existsSync("./lib/auth.js"));
+
 export default async function handler(req, res) {
   try {
     // --- Always send CORS headers ---
