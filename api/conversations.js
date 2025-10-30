@@ -1,23 +1,24 @@
-import pool from "../db.js";
-import { verifyToken } from "../lib/auth.js";
-
 export default async function handler(req, res) {
-  // === Enable CORS ===
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  if (req.method === "OPTIONS") return res.status(200).end();
-
   try {
-    // --- CREATE NEW CONVERSATION ---
+    // --- Always send CORS headers ---
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") return res.status(200).end();
+
+    // --- Lazy import (avoids startup import errors) ---
+    const { verifyToken } = await import("../lib/auth.js");
+    const poolModule = await import("../db.js");
+    const pool = poolModule.default || poolModule.pool;
+
+    // --- Handle POST ---
     if (req.method === "POST") {
       await verifyToken(req, res, async () => {
         const { trainerName, associateName } = req.body || {};
-        const { name: creatorName } = req.user; // from decoded JWT
+        const { name: creatorName } = req.user;
 
-        if (!trainerName || !associateName) {
+        if (!trainerName || !associateName)
           return res.status(400).json({ error: "Missing required fields" });
-        }
 
         const convKey = Math.random().toString(36).substring(2, 8).toUpperCase();
 
@@ -34,46 +35,33 @@ export default async function handler(req, res) {
           conversation: result.rows[0],
         });
       });
+      return;
     }
 
-    // --- GET ALL OR SINGLE CONVERSATIONS ---
-    else if (req.method === "GET") {
+    // --- Handle GET ---
+    if (req.method === "GET") {
       const { convKey, all } = req.query || {};
 
-      // Get all conversations
-      if (all === "true") {
-        const result = await pool.query(
-          "SELECT * FROM conversations ORDER BY start_time DESC"
-        );
-        return res.status(200).json(result.rows);
-      }
+      const result =
+        all === "true"
+          ? await pool.query("SELECT * FROM conversations ORDER BY start_time DESC")
+          : await pool.query("SELECT * FROM conversations WHERE conv_key = $1", [
+              convKey,
+            ]);
 
-      // Get a single conversation
-      if (!convKey) {
-        return res.status(400).json({ error: "Missing convKey" });
-      }
-
-      const result = await pool.query(
-        "SELECT * FROM conversations WHERE conv_key = $1",
-        [convKey]
-      );
-
-      if (result.rows.length === 0) {
+      if (!result.rows.length)
         return res.status(404).json({ error: "Conversation not found" });
-      }
 
-      return res.status(200).json(result.rows[0]);
+      return res.status(200).json(all === "true" ? result.rows : result.rows[0]);
     }
 
-    // --- INVALID METHOD ---
-    else {
-      return res.status(405).json({ error: "Method not allowed" });
-    }
+    return res.status(405).json({ error: "Method not allowed" });
   } catch (err) {
-    console.error("Error in /api/conversations:", err);
-    return res.status(500).json({
-      error: "Internal Server Error",
-      details: err.message,
-    });
+    // 🧩 If imports fail or anything else breaks, still send CORS
+    if (!res.headersSent) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+    }
+    console.error("Fatal error in /api/conversations:", err);
+    return res.status(500).json({ error: err.message });
   }
 }
