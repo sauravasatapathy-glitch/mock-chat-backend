@@ -2,11 +2,14 @@
   "version": 2,
   "functions": {
     "api/**/*.js": {
-      "runtime": "nodejs20.x",
+      "runtime": "@vercel/node@3",
       "includeFiles": "lib/**"
     }
   },
   "routes": [
-    { "src": "/api/(.*)", "dest": "/api/$1.js" }
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1.js"
+    }
   ]
 }
