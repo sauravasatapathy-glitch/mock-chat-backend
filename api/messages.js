@@ -9,10 +9,11 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === "POST") {
-      const { convKey, senderName, senderRole, text } = req.body || {};
-      if (!convKey || !senderName || !text) {
-        return res.status(400).json({ error: "Missing required fields" });
-      }
+const { conv_key, sender_name, sender_role, text } = req.body || {};
+if (!conv_key || !sender_name || !text) {
+  return res.status(400).json({ error: "Missing required fields" });
+}
+
 
       await pool.query(
         `INSERT INTO messages (conv_key, sender_name, role, text, timestamp)
