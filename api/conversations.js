@@ -1,22 +1,23 @@
 import pool from "../db.js";
-import { verifyToken, requireRole } from "../lib/auth.js";
+import { verifyToken } from "../lib/auth.js";
 
 export default async function handler(req, res) {
-  // Enable CORS
+  // === Enable CORS ===
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
   if (req.method === "OPTIONS") return res.status(200).end();
 
   try {
+    // --- CREATE NEW CONVERSATION ---
     if (req.method === "POST") {
       await verifyToken(req, res, async () => {
-        const { trainerName, associateName } = req.body;
-        const { name: creatorName } = req.user; // extracted from token
+        const { trainerName, associateName } = req.body || {};
+        const { name: creatorName } = req.user; // from decoded JWT
 
-        if (!trainerName || !associateName)
+        if (!trainerName || !associateName) {
           return res.status(400).json({ error: "Missing required fields" });
+        }
 
         const convKey = Math.random().toString(36).substring(2, 8).toUpperCase();
 
@@ -35,10 +36,11 @@ export default async function handler(req, res) {
       });
     }
 
+    // --- GET ALL OR SINGLE CONVERSATIONS ---
     else if (req.method === "GET") {
-      const { convKey, all } = req.query;
+      const { convKey, all } = req.query || {};
 
-      // ✅ If “all” flag passed, return all conversations (merged route)
+      // Get all conversations
       if (all === "true") {
         const result = await pool.query(
           "SELECT * FROM conversations ORDER BY start_time DESC"
@@ -46,24 +48,32 @@ export default async function handler(req, res) {
         return res.status(200).json(result.rows);
       }
 
-      // ✅ Otherwise fetch a single conversation by key
+      // Get a single conversation
+      if (!convKey) {
+        return res.status(400).json({ error: "Missing convKey" });
+      }
+
       const result = await pool.query(
         "SELECT * FROM conversations WHERE conv_key = $1",
         [convKey]
       );
 
-      if (result.rows.length === 0)
+      if (result.rows.length === 0) {
         return res.status(404).json({ error: "Conversation not found" });
+      }
 
       return res.status(200).json(result.rows[0]);
     }
 
+    // --- INVALID METHOD ---
     else {
-      res.status(405).json({ error: "Method not allowed" });
+      return res.status(405).json({ error: "Method not allowed" });
     }
-
   } catch (err) {
     console.error("Error in /api/conversations:", err);
-    res.status(500).json({ error: "Internal Server Error", details: err.message });
+    return res.status(500).json({
+      error: "Internal Server Error",
+      details: err.message,
+    });
   }
 }
