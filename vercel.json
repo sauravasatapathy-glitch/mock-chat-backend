@@ -1,15 +1,11 @@
 {
-  "version": 2,
   "functions": {
     "api/**/*.js": {
-      "runtime": "@vercel/node@3",
+      "runtime": "vercel-node@3.0.0",
       "includeFiles": "lib/**"
     }
   },
   "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1.js"
-    }
+    { "src": "/api/(.*)", "dest": "/api/$1.js" }
   ]
 }
