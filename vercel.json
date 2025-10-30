@@ -2,7 +2,9 @@
   "version": 2,
   "functions": {
     "api/**/*.js": {
-      "includeFiles": "lib/**"
+      "includeFiles": [
+        "lib/**"
+      ]
     }
   },
   "builds": [
@@ -12,9 +14,6 @@
     }
   ],
   "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1.js"
-    }
+    { "src": "/api/(.*)", "dest": "/api/$1.js" }
   ]
 }
