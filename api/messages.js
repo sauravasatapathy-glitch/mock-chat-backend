@@ -1,65 +1,97 @@
 import pool from "../lib/db.js";
 
 export default async function handler(req, res) {
-  // === Strict CORS for frontend ===
-  res.setHeader("Access-Control-Allow-Origin", "https://mockchat.vercel.app");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
-  if (req.method === "OPTIONS") return res.status(200).end();
-
   try {
-    // === POST: Save a new message ===
+    const allowedOrigin = "https://mockchat.vercel.app";
+    res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") return res.status(200).end();
+
+    // === POST: send message ===
     if (req.method === "POST") {
       const { convKey, senderName, senderRole, text } = req.body || {};
-
-      if (!convKey || !senderName || !text) {
+      if (!convKey || !senderName || !text)
         return res.status(400).json({ error: "Missing required fields" });
-      }
 
-      const insertQuery = `
-        INSERT INTO messages (conv_key, sender_name, role, text, timestamp)
-        VALUES ($1, $2, $3, $4, NOW())
-        RETURNING id, conv_key, sender_name, role, text, timestamp
-      `;
-
-      const result = await pool.query(insertQuery, [
-        convKey,
-        senderName,
-        senderRole || "unknown",
-        text,
-      ]);
-
-      // Return full message for instant rendering (optional)
-      return res.status(200).json(result.rows[0]);
-    }
-
-    // === GET: Fetch all messages for a conversation ===
-    if (req.method === "GET") {
-      const { convKey } = req.query || {};
-      if (!convKey) {
-        return res.status(400).json({ error: "Missing convKey" });
-      }
-
-      const result = await pool.query(
-        "SELECT * FROM messages WHERE conv_key = $1 ORDER BY id ASC",
-        [convKey]
+      await pool.query(
+        `INSERT INTO messages (conv_key, sender_name, role, text, timestamp)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        [convKey, senderName, senderRole, text]
       );
 
-      // Normalize timestamps for frontend
-      const messages = result.rows.map((msg) => ({
-        ...msg,
-        timestamp: msg.timestamp ? new Date(msg.timestamp).toISOString() : null,
-      }));
-
-      return res.status(200).json(messages);
+      return res.status(200).json({ success: true });
     }
 
-    // === Fallback ===
+    // === GET: decide between SSE vs normal fetch ===
+    if (req.method === "GET") {
+      const { convKey } = req.query || {};
+      if (!convKey) return res.status(400).json({ error: "Missing convKey" });
+
+      // 👇 Check if client expects SSE
+      const isSSE = req.headers.accept === "text/event-stream";
+
+      if (!isSSE) {
+        // === Normal GET: return messages JSON ===
+        const result = await pool.query(
+          "SELECT * FROM messages WHERE conv_key = $1 ORDER BY timestamp ASC",
+          [convKey]
+        );
+        return res.status(200).json(result.rows);
+      }
+
+      // === SSE mode: real-time stream ===
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+
+      const sendEvent = (data) => {
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      };
+
+      // Initial load
+      const initial = await pool.query(
+        "SELECT * FROM messages WHERE conv_key = $1 ORDER BY timestamp ASC",
+        [convKey]
+      );
+      sendEvent({ type: "init", messages: initial.rows });
+
+      let lastCount = initial.rows.length;
+
+      const interval = setInterval(async () => {
+        try {
+          const result = await pool.query(
+            "SELECT * FROM messages WHERE conv_key = $1 ORDER BY timestamp ASC",
+            [convKey]
+          );
+          if (result.rows.length > lastCount) {
+            const newMessages = result.rows.slice(lastCount);
+            lastCount = result.rows.length;
+            sendEvent({ type: "new", messages: newMessages });
+          }
+        } catch (err) {
+          console.error("Stream polling error:", err);
+        }
+      }, 2000);
+
+      req.on("close", () => {
+        clearInterval(interval);
+        res.end();
+      });
+
+      return; // end handler here
+    }
+
     return res.status(405).json({ error: "Method not allowed" });
   } catch (err) {
     console.error("💥 Error in /api/messages:", err);
-    return res.status(500).json({ error: err.message });
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    } else {
+      res.end();
+    }
   }
 }
