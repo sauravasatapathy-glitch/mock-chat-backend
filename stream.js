@@ -1,38 +1,56 @@
-import pool from "../lib/db.js";
+import pool from "./db.js";
 
 export default async function handler(req, res) {
-  // === CORS headers ===
-  res.setHeader("Access-Control-Allow-Origin", "https://mockchat.vercel.app");
+  // === CORS ===
+  const allowedOrigin = "https://mockchat.vercel.app";
+  res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Connection", "keep-alive");
 
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  const { convKey } = req.query;
-  if (!convKey) return res.status(400).end("Missing convKey");
+  try {
+    // === POST: Add new message ===
+    if (req.method === "POST") {
+      const { convKey, senderName, senderRole, text } = req.body || {};
 
-  console.log(`🔌 SSE connected for conversation: ${convKey}`);
+      if (!convKey || !senderName || !text) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
 
-  // === Track clients globally (per conversation) ===
-  globalThis.chatClients = globalThis.chatClients || {};
-  if (!globalThis.chatClients[convKey]) globalThis.chatClients[convKey] = [];
-  const client = { res };
-  globalThis.chatClients[convKey].push(client);
+      await pool.query(
+        `INSERT INTO messages (conv_key, sender_name, role, text, timestamp)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        [convKey, senderName, senderRole || "agent", text]
+      );
 
-  // === Keep-alive ping every 25s to prevent disconnect ===
-  const keepAlive = setInterval(() => {
-    res.write(`event: ping\ndata: {}\n\n`);
-  }, 25000);
+      return res.status(200).json({ success: true });
+    }
 
-  req.on("close", () => {
-    clearInterval(keepAlive);
-    globalThis.chatClients[convKey] = globalThis.chatClients[convKey].filter(
-      (c) => c !== client
-    );
-    console.log(`❌ SSE closed for convKey: ${convKey}`);
-  });
+    // === GET: Fetch messages for a conversation ===
+    if (req.method === "GET") {
+      const { convKey } = req.query || {};
+
+      if (!convKey) {
+        return res.status(400).json({ error: "Missing convKey" });
+      }
+
+      const result = await pool.query(
+        `SELECT id, conv_key, sender_name, role, text, timestamp
+         FROM messages
+         WHERE conv_key = $1
+         ORDER BY timestamp ASC`,
+        [convKey]
+      );
+
+      return res.status(200).json(result.rows);
+    }
+
+    // === Invalid method ===
+    return res.status(405).json({ error: "Method not allowed" });
+  } catch (err) {
+    console.error("💥 Error in /api/messages:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
 }
