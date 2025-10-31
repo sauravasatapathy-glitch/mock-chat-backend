@@ -13,24 +13,25 @@ export default async function handler(req, res) {
     // ==============================================================
     // 🟢 POST — Send a new message
     // ==============================================================
-    if (req.method === "POST") {
-      const { convKey, senderName, senderRole, text } = req.body || {};
+// 🟢 POST — Send a new message
+if (req.method === "POST") {
+  const { convKey, senderName, senderRole, text } = req.body || {};
 
-      if (!convKey || !senderName || !text) {
-        return res.status(400).json({ error: "Missing required fields" });
-      }
+  if (!convKey || !senderName || !text) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
 
-      // ✅ Insert and return full inserted message (includes id + timestamp)
-      const result = await pool.query(
-        `INSERT INTO messages (conv_key, sender_name, sender_role, text, timestamp)
-         VALUES ($1, $2, $3, $4, NOW())
-         RETURNING id, conv_key, sender_name, sender_role, text, timestamp`,
-        [convKey, senderName, senderRole, text]
-      );
+  // ✅ Use "role" (matches your DB)
+  const result = await pool.query(
+    `INSERT INTO messages (conv_key, sender_name, role, text, timestamp)
+     VALUES ($1, $2, $3, $4, NOW())
+     RETURNING id, conv_key, sender_name, role, text, timestamp`,
+    [convKey, senderName, senderRole, text]
+  );
 
-      // ✅ Return the inserted message (used to prevent duplicate rendering)
-      return res.status(200).json(result.rows[0]);
-    }
+  return res.status(200).json(result.rows[0]);
+}
+
 
     // ==============================================================
     // 🟡 GET — Either Normal fetch OR SSE (real-time)
@@ -48,7 +49,7 @@ export default async function handler(req, res) {
       // ==========================================================
       if (!isSSE) {
         const result = await pool.query(
-          `SELECT id, conv_key, sender_name, sender_role, text, timestamp
+          `SELECT id, conv_key, sender_name, role, text, timestamp
            FROM messages
            WHERE conv_key = $1
            ORDER BY timestamp ASC`,
@@ -73,7 +74,7 @@ export default async function handler(req, res) {
 
       // === Initial load ===
       const initial = await pool.query(
-        `SELECT id, conv_key, sender_name, sender_role, text, timestamp
+        `SELECT id, conv_key, sender_name, role, text, timestamp
          FROM messages
          WHERE conv_key = $1
          ORDER BY timestamp ASC`,
@@ -87,7 +88,7 @@ export default async function handler(req, res) {
       const interval = setInterval(async () => {
         try {
           const result = await pool.query(
-            `SELECT id, conv_key, sender_name, sender_role, text, timestamp
+            `SELECT id, conv_key, sender_name, role, text, timestamp
              FROM messages
              WHERE conv_key = $1
              ORDER BY timestamp ASC`,
