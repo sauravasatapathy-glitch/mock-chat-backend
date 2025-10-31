@@ -1,7 +1,7 @@
 // /api/auth.js
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import pool from "../db.js";
+import pool from "../lib/db.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecretkey";
 
