@@ -1,6 +1,7 @@
 import pool from "../lib/db.js";
 
 export default async function handler(req, res) {
+  // === CORS headers ===
   res.setHeader("Access-Control-Allow-Origin", "https://mockchat.vercel.app");
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -14,40 +15,24 @@ export default async function handler(req, res) {
   const { convKey } = req.query;
   if (!convKey) return res.status(400).end("Missing convKey");
 
-  console.log(`🔄 SSE connected for convKey: ${convKey}`);
+  console.log(`🔌 SSE connected for conversation: ${convKey}`);
 
-  let lastMessageId = 0;
+  // === Track clients globally (per conversation) ===
+  globalThis.chatClients = globalThis.chatClients || {};
+  if (!globalThis.chatClients[convKey]) globalThis.chatClients[convKey] = [];
+  const client = { res };
+  globalThis.chatClients[convKey].push(client);
 
-  // Keep connection alive every 30s
+  // === Keep-alive ping every 25s to prevent disconnect ===
   const keepAlive = setInterval(() => {
     res.write(`event: ping\ndata: {}\n\n`);
-  }, 30000);
-
-  // Periodically check for new messages
-  const checkMessages = setInterval(async () => {
-    try {
-      const result = await pool.query(
-        "SELECT * FROM messages WHERE conv_key = $1 AND id > $2 ORDER BY id ASC",
-        [convKey, lastMessageId]
-      );
-
-      if (result.rows.length > 0) {
-        result.rows.forEach((msg) => {
-          res.write(`data: ${JSON.stringify(msg)}\n\n`);
-          lastMessageId = msg.id;
-        });
-      }
-    } catch (err) {
-      console.error("SSE error:", err);
-      clearInterval(checkMessages);
-      clearInterval(keepAlive);
-      res.end();
-    }
-  }, 2000);
+  }, 25000);
 
   req.on("close", () => {
-    clearInterval(checkMessages);
     clearInterval(keepAlive);
+    globalThis.chatClients[convKey] = globalThis.chatClients[convKey].filter(
+      (c) => c !== client
+    );
     console.log(`❌ SSE closed for convKey: ${convKey}`);
   });
 }
