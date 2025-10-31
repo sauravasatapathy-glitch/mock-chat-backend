@@ -11,7 +11,7 @@ export default async function handler(req, res) {
 
     // --- Lazy import (avoids startup import errors) ---
     const { verifyToken } = await import("../lib/auth.js");
-    const poolModule = await import("../db.js");
+    const poolModule = await import("../lib/db.js");
     const pool = poolModule.default || poolModule.pool;
 
     // --- Handle POST ---
