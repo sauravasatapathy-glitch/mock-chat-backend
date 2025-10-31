@@ -1,56 +1,71 @@
 import pool from "./db.js";
 
 export default async function handler(req, res) {
-  // === CORS ===
-  const allowedOrigin = "https://mockchat.vercel.app";
-  res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
-  res.setHeader("Access-Control-Allow-Credentials", "true");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
-  if (req.method === "OPTIONS") return res.status(200).end();
-
   try {
-    // === POST: Add new message ===
-    if (req.method === "POST") {
-      const { convKey, senderName, senderRole, text } = req.body || {};
+    const allowedOrigin = "https://mockchat.vercel.app";
+    res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
-      if (!convKey || !senderName || !text) {
-        return res.status(400).json({ error: "Missing required fields" });
-      }
+    if (req.method === "OPTIONS") return res.status(200).end();
 
-      await pool.query(
-        `INSERT INTO messages (conv_key, sender_name, role, text, timestamp)
-         VALUES ($1, $2, $3, $4, NOW())`,
-        [convKey, senderName, senderRole || "agent", text]
-      );
-
-      return res.status(200).json({ success: true });
+    const { convKey } = req.query;
+    if (!convKey) {
+      res.status(400).json({ error: "Missing convKey" });
+      return;
     }
 
-    // === GET: Fetch messages for a conversation ===
-    if (req.method === "GET") {
-      const { convKey } = req.query || {};
+    // === Setup SSE Headers ===
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
 
-      if (!convKey) {
-        return res.status(400).json({ error: "Missing convKey" });
+    // === Helper: send message to client ===
+    const sendEvent = (data) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    // === Initial load ===
+    const initial = await pool.query(
+      "SELECT * FROM messages WHERE conv_key = $1 ORDER BY timestamp ASC",
+      [convKey]
+    );
+    sendEvent({ type: "init", messages: initial.rows });
+
+    // === Polling mechanism every 3 seconds ===
+    let lastCount = initial.rows.length;
+
+    const interval = setInterval(async () => {
+      try {
+        const result = await pool.query(
+          "SELECT * FROM messages WHERE conv_key = $1 ORDER BY timestamp ASC",
+          [convKey]
+        );
+
+        if (result.rows.length > lastCount) {
+          const newMessages = result.rows.slice(lastCount);
+          lastCount = result.rows.length;
+          sendEvent({ type: "new", messages: newMessages });
+        }
+      } catch (err) {
+        console.error("Stream polling error:", err);
       }
+    }, 3000);
 
-      const result = await pool.query(
-        `SELECT id, conv_key, sender_name, role, text, timestamp
-         FROM messages
-         WHERE conv_key = $1
-         ORDER BY timestamp ASC`,
-        [convKey]
-      );
-
-      return res.status(200).json(result.rows);
-    }
-
-    // === Invalid method ===
-    return res.status(405).json({ error: "Method not allowed" });
+    // === Cleanup on client disconnect ===
+    req.on("close", () => {
+      clearInterval(interval);
+      res.end();
+    });
   } catch (err) {
-    console.error("💥 Error in /api/messages:", err);
-    return res.status(500).json({ error: "Internal Server Error" });
+    console.error("💥 Error in /api/stream:", err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Internal Server Error" });
+    } else {
+      res.end();
+    }
   }
 }
