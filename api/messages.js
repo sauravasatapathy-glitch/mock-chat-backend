@@ -1,131 +1,124 @@
+// api/messages.js
 import pool from "../lib/db.js";
+
+const ALLOWED_ORIGIN = "https://mockchat.vercel.app"; // <<-- update to your frontend origin
 
 export default async function handler(req, res) {
   try {
-    // ✅ Allow frontend requests
-    const allowedOrigin = "https://mockchat.vercel.app";
-    res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+    // CORS for regular requests
+    res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
     res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
     if (req.method === "OPTIONS") return res.status(200).end();
 
-    // ==============================================================
-    // 🟢 POST — Send a new message
-    // ==============================================================
-// 🟢 POST — Send a new message
-if (req.method === "POST") {
-  const { convKey, senderName, senderRole, text } = req.body || {};
+    // -------------------
+    // POST: Insert message
+    // -------------------
+    if (req.method === "POST") {
+      const { convKey, senderName, senderRole, text, attachment } = req.body || {};
+      if (!convKey || !senderName || !text) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
 
-  if (!convKey || !senderName || !text) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
+      const result = await pool.query(
+        `INSERT INTO messages (conv_key, sender_name, role, text, attachment_url, timestamp)
+         VALUES ($1,$2,$3,$4,$5,NOW())
+         RETURNING id, conv_key, sender_name, role, text, attachment_url AS attachment, timestamp`,
+        [convKey, senderName, senderRole || "associate", text, attachment || null]
+      );
 
-  // ✅ Use "role" (matches your DB)
-  const result = await pool.query(
-    `INSERT INTO messages (conv_key, sender_name, role, text, timestamp)
-     VALUES ($1, $2, $3, $4, NOW())
-     RETURNING id, conv_key, sender_name, role, text, timestamp`,
-    [convKey, senderName, senderRole, text]
-  );
+      // return the inserted row so client can render immediately with id
+      return res.status(200).json(result.rows[0]);
+    }
 
-  return res.status(200).json(result.rows[0]);
-}
-
-
-    // ==============================================================
-    // 🟡 GET — Either Normal fetch OR SSE (real-time)
-    // ==============================================================
+    // ------------------------------
+    // GET: JSON fetch OR SSE stream
+    // ------------------------------
     if (req.method === "GET") {
       const { convKey } = req.query || {};
       if (!convKey) return res.status(400).json({ error: "Missing convKey" });
 
-      // 👇 Check if client requested SSE stream
-      const acceptHeader = req.headers.accept || "";
-      const isSSE = acceptHeader.includes("text/event-stream");
+      const accept = req.headers.accept || "";
+      const isSSE = accept.includes("text/event-stream");
 
-      // ==========================================================
-      // 🔹 Normal GET (used by loadMessages)
-      // ==========================================================
+      // Normal JSON fetch
       if (!isSSE) {
-        const result = await pool.query(
-          `SELECT id, conv_key, sender_name, role, text, timestamp
-           FROM messages
-           WHERE conv_key = $1
-           ORDER BY timestamp ASC`,
+        const r = await pool.query(
+          `SELECT id, conv_key, sender_name, role, text, attachment_url AS attachment, timestamp
+           FROM messages WHERE conv_key = $1 ORDER BY timestamp ASC`,
           [convKey]
         );
-
-        return res.status(200).json(result.rows);
+        return res.status(200).json(r.rows);
       }
 
-      // ==========================================================
-      // 🔹 SSE Mode — Continuous message stream
-      // ==========================================================
+      // SSE mode
+      // Set correct headers for EventSource
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
+        "Access-Control-Allow-Origin": ALLOWED_ORIGIN
       });
 
-      const sendEvent = (data) => {
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      const sendEvent = (payload) => {
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
       };
 
-      // === Initial load ===
+      // initial load
       const initial = await pool.query(
-        `SELECT id, conv_key, sender_name, role, text, timestamp
-         FROM messages
-         WHERE conv_key = $1
-         ORDER BY timestamp ASC`,
+        `SELECT id, conv_key, sender_name, role, text, attachment_url AS attachment, timestamp
+         FROM messages WHERE conv_key = $1 ORDER BY timestamp ASC`,
         [convKey]
       );
       sendEvent({ type: "init", messages: initial.rows });
 
-      let lastCount = initial.rows.length;
+      // track last id sent
+      let lastId = initial.rows.length ? initial.rows[initial.rows.length - 1].id : 0;
 
-      // === Poll DB every 2 seconds for new messages ===
+      // polling loop: messages + typing_state
       const interval = setInterval(async () => {
         try {
-          const result = await pool.query(
-            `SELECT id, conv_key, sender_name, role, text, timestamp
-             FROM messages
-             WHERE conv_key = $1
-             ORDER BY timestamp ASC`,
+          // new messages
+          const r = await pool.query(
+            `SELECT id, conv_key, sender_name, role, text, attachment_url AS attachment, timestamp
+             FROM messages WHERE conv_key = $1 AND id > $2 ORDER BY id ASC`,
+            [convKey, lastId]
+          );
+          if (r.rows.length > 0) {
+            lastId = r.rows[r.rows.length - 1].id;
+            sendEvent({ type: "new", messages: r.rows });
+          }
+
+          // typing states (recent)
+          const t = await pool.query(
+            `SELECT user_name, role, updated_at
+             FROM typing_state
+             WHERE conv_key = $1 AND updated_at > NOW() - INTERVAL '6 seconds'`,
             [convKey]
           );
-
-          if (result.rows.length > lastCount) {
-            const newMessages = result.rows.slice(lastCount);
-            lastCount = result.rows.length;
-            sendEvent({ type: "new", messages: newMessages });
+          if (t.rows.length > 0) {
+            sendEvent({ type: "typing", typing: t.rows });
           }
         } catch (err) {
-          console.error("Stream polling error:", err);
+          console.error("SSE polling error:", err);
         }
-      }, 2000);
+      }, 1500); // 1.5s
 
-      // === Cleanup when client disconnects ===
       req.on("close", () => {
         clearInterval(interval);
         res.end();
       });
 
-      return; // Stop here — SSE connection stays open
+      return;
     }
 
-    // ==============================================================
-    // 🔴 Invalid Method
-    // ==============================================================
+    // Method not allowed
     return res.status(405).json({ error: "Method not allowed" });
-
   } catch (err) {
-    console.error("💥 Error in /api/messages:", err);
-
-    if (!res.headersSent) {
-      res.status(500).json({ error: err.message });
-    } else {
-      res.end();
-    }
+    console.error("Error in /api/messages:", err);
+    if (!res.headersSent) return res.status(500).json({ error: err.message });
+    res.end();
   }
 }
