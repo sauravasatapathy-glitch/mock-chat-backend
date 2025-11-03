@@ -1,52 +1,41 @@
 // api/typing.js
-import { DB } from "../memoryStore.js";
+import pool from "../lib/db.js";
 
-function sendJson(res, status, payload) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  res.status(status).json(payload);
-}
+const ALLOWED_ORIGIN = "https://mockchat.vercel.app";
 
-// TTL for typing entries (ms)
-const TYPING_TTL = 3000;
-
-export default function handler(req, res) {
-  if (req.method === "OPTIONS") return sendJson(res, 200, { ok: true });
+export default async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") return res.status(200).end();
 
   try {
     if (req.method === "POST") {
-      const { key, userName, action } = req.body || {};
-      if (!key || !userName) return sendJson(res, 400, { error: "Missing key or userName" });
+      const { convKey, userName, role, typing } = req.body || {};
+      if (!convKey || !userName) return res.status(400).json({ error: "Missing fields" });
 
-      DB.typing[key] = DB.typing[key] || {};
-      if (action === "start") {
-        DB.typing[key][userName] = Date.now();
-      } else if (action === "stop") {
-        delete DB.typing[key][userName];
+      if (typing) {
+        // upsert: update updated_at or insert
+        await pool.query(
+          `INSERT INTO typing_state (conv_key, user_name, role, updated_at)
+           VALUES ($1, $2, $3, NOW())
+           ON CONFLICT (conv_key, user_name) DO UPDATE SET updated_at = NOW(), role = EXCLUDED.role`,
+          [convKey, userName, role]
+        );
       } else {
-        return sendJson(res, 400, { error: "Invalid typing action" });
+        // stop typing: delete row
+        await pool.query(
+          `DELETE FROM typing_state WHERE conv_key = $1 AND user_name = $2`,
+          [convKey, userName]
+        );
       }
-      return sendJson(res, 200, { ok: true });
+
+      return res.status(200).json({ success: true });
     }
 
-    if (req.method === "GET") {
-      const { key } = req.query || {};
-      if (!key) return sendJson(res, 400, { error: "Missing key" });
-
-      DB.typing[key] = DB.typing[key] || {};
-      // prune stale
-      const now = Date.now();
-      Object.keys(DB.typing[key]).forEach(u => {
-        if (now - DB.typing[key][u] > TYPING_TTL) delete DB.typing[key][u];
-      });
-
-      return sendJson(res, 200, Object.keys(DB.typing[key]));
-    }
-
-    return sendJson(res, 405, { error: "Method not allowed" });
+    return res.status(405).json({ error: "Method not allowed" });
   } catch (err) {
-    console.error("typing error", err);
-    return sendJson(res, 500, { error: err.message });
+    console.error("Error in /api/typing:", err);
+    return res.status(500).json({ error: err.message });
   }
 }
