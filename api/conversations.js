@@ -18,19 +18,19 @@ export default async function handler(req, res) {
 
   try {
     // ✅ POST /api/conversations/end
-    if (req.method === "POST" && req.url.endsWith("/end")) {
-      return verifyToken(req, res, async () => {
-        const { convKey } = req.body || {};
-        if (!convKey) return res.status(400).json({ error: "Missing convKey" });
+if (req.method === "POST" && req.query.end === "true") {
+  return verifyToken(req, res, async () => {
+    const { convKey } = req.body || {};
+    if (!convKey) return res.status(400).json({ error: "Missing convKey" });
 
-        await pool.query(
-          "UPDATE conversations SET ended = true, end_time = NOW() WHERE conv_key = $1",
-          [convKey]
-        );
+    await pool.query(
+      "UPDATE conversations SET ended = true, end_time = NOW() WHERE conv_key = $1",
+      [convKey]
+    );
 
-        return res.status(200).json({ success: true, convKey });
-      });
-    }
+    return res.status(200).json({ success: true, convKey });
+  });
+}
 
     // ✅ POST /api/conversations (create)
     if (req.method === "POST") {
