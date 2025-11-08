@@ -17,29 +17,42 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ✅ POST /api/conversations/end
-// ✅ POST /api/conversations?end=true
+
+    // ✅ POST /api/conversations?end=true
 if (req.method === "POST" && req.query.end === "true") {
   return verifyToken(req, res, async () => {
     const { convKey } = req.body || {};
+    const userName = req.user?.name || "System";
+
     if (!convKey) return res.status(400).json({ error: "Missing convKey" });
 
-    // --- Mark the conversation as ended
+    // 1️⃣ End the conversation
     await pool.query(
       "UPDATE conversations SET ended = true, end_time = NOW() WHERE conv_key = $1",
       [convKey]
     );
 
-    // --- Insert a system message for SSE broadcast
+    // 2️⃣ Insert a system message announcing the end
+    const text = `Conversation ended by ${userName}.`;
     await pool.query(
       `INSERT INTO messages (conv_key, sender_name, sender_role, text, timestamp)
-       VALUES ($1, 'System', 'system', 'Conversation ended by trainer/admin.', NOW())`,
-      [convKey]
+       VALUES ($1, 'System', 'system', $2, NOW())`,
+      [convKey, text]
     );
 
-    return res.status(200).json({ success: true, convKey });
+    // 3️⃣ Optional: Notify SSE subscribers
+    try {
+      await pool.query("NOTIFY new_message, $1", [
+        JSON.stringify({ convKey, type: "new" }),
+      ]);
+    } catch (notifyErr) {
+      console.warn("NOTIFY failed (likely fine locally):", notifyErr.message);
+    }
+
+    return res.status(200).json({ success: true, convKey, systemMessage: text });
   });
 }
+
 
 
     // ✅ POST /api/conversations (create)
