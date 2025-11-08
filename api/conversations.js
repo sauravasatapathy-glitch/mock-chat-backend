@@ -35,7 +35,7 @@ if (req.method === "POST" && req.query.end === "true") {
     // 2️⃣ Insert a system message announcing the end
     const text = `Conversation ended by ${userName}.`;
     await pool.query(
-      `INSERT INTO messages (conv_key, sender_name, sender_role, text, timestamp)
+      `INSERT INTO messages (conv_key, sender_name, role, text, timestamp)
        VALUES ($1, 'System', 'system', $2, NOW())`,
       [convKey, text]
     );
