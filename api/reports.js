@@ -6,27 +6,27 @@ import { Parser } from "json2csv";
 const ALLOWED_ORIGIN = "https://mockchat.vercel.app";
 
 export default async function handler(req, res) {
-  // --- ✅ Always send CORS headers
+  // --- ✅ Always return CORS headers for every request
   res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
-  // --- ✅ Handle CORS preflight requests early
+  // --- ✅ Handle preflight requests cleanly
   if (req.method === "OPTIONS") {
-    res.status(200).end();
-    return;
+    return res.status(200).end();
   }
 
-  // --- ✅ Restrict to GET only
+  // --- ✅ Allow only GET
   if (req.method !== "GET") {
-    res.status(405).json({ error: "Method not allowed" });
-    return;
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
+    // ✅ Verify token first (same as conversations.js)
     return verifyToken(req, res, async () => {
       const { from, to } = req.query || {};
+
       if (!from || !to) {
         return res.status(400).json({ error: "Missing 'from' or 'to' parameters" });
       }
@@ -34,7 +34,7 @@ export default async function handler(req, res) {
       const role = req.user?.role || "";
       const trainerName = req.user?.name || "";
 
-      // --- ✅ Query with duration in HH:MM:SS and seconds
+      // ✅ Query to calculate durations & message count
       const q = `
         SELECT
           c.trainer_name AS "Trainer",
@@ -57,20 +57,20 @@ export default async function handler(req, res) {
       const rows = result.rows || [];
 
       if (!rows.length) {
-        return res.status(200).json({ message: "No data found for given range." });
+        return res.status(200).json({ message: "No data found for the given range." });
       }
 
-      // --- ✅ Convert JSON to CSV
+      // ✅ Convert result to CSV
       const parser = new Parser();
       const csv = parser.parse(rows);
 
-      // --- ✅ Return CSV file
+      // ✅ Send CSV as downloadable file
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", `attachment; filename=MockChat_Report_${Date.now()}.csv`);
-      res.status(200).send(csv);
+      return res.status(200).send(csv);
     });
   } catch (err) {
     console.error("Error in /api/reports:", err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 }
