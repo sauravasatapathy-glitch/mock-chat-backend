@@ -3,25 +3,22 @@ import pool from "../lib/db.js";
 import { verifyToken } from "../lib/auth.js";
 import { Parser } from "json2csv";
 
-export const config = {
-  runtime: "edge", // ✅ Vercel Edge Functions handle preflights faster
-};
-
 const ALLOWED_ORIGIN = "https://mockchat.vercel.app";
 
 export default async function handler(req, res) {
-  // ✅ Always send CORS headers
+  // --- ✅ Always send CORS headers
   res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
+  res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
 
-  // ✅ Immediately return OK for preflight
+  // --- ✅ Handle CORS preflight requests early
   if (req.method === "OPTIONS") {
     res.status(200).end();
     return;
   }
 
+  // --- ✅ Restrict to GET only
   if (req.method !== "GET") {
     res.status(405).json({ error: "Method not allowed" });
     return;
@@ -37,6 +34,7 @@ export default async function handler(req, res) {
       const role = req.user?.role || "";
       const trainerName = req.user?.name || "";
 
+      // --- ✅ Query with duration in HH:MM:SS and seconds
       const q = `
         SELECT
           c.trainer_name AS "Trainer",
@@ -56,14 +54,17 @@ export default async function handler(req, res) {
 
       const params = role === "admin" ? [from, to] : [from, to, trainerName];
       const result = await pool.query(q, params);
+      const rows = result.rows || [];
 
-      if (!result.rows.length) {
+      if (!rows.length) {
         return res.status(200).json({ message: "No data found for given range." });
       }
 
+      // --- ✅ Convert JSON to CSV
       const parser = new Parser();
-      const csv = parser.parse(result.rows);
+      const csv = parser.parse(rows);
 
+      // --- ✅ Return CSV file
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", `attachment; filename=MockChat_Report_${Date.now()}.csv`);
       res.status(200).send(csv);
