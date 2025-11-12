@@ -3,23 +3,28 @@ import pool from "../lib/db.js";
 import { verifyToken } from "../lib/auth.js";
 import { Parser } from "json2csv";
 
+export const config = {
+  runtime: "edge", // ✅ Vercel Edge Functions handle preflights faster
+};
+
 const ALLOWED_ORIGIN = "https://mockchat.vercel.app";
 
 export default async function handler(req, res) {
-  // --- ✅ Always send CORS headers (even for OPTIONS)
+  // ✅ Always send CORS headers
   res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
-  res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
 
-  // --- ✅ Handle OPTIONS preflight immediately with HTTP 200
+  // ✅ Immediately return OK for preflight
   if (req.method === "OPTIONS") {
-    return res.status(200).json({ ok: true });
+    res.status(200).end();
+    return;
   }
 
-  // --- ✅ Restrict to GET only
   if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
+    res.status(405).json({ error: "Method not allowed" });
+    return;
   }
 
   try {
@@ -32,7 +37,6 @@ export default async function handler(req, res) {
       const role = req.user?.role || "";
       const trainerName = req.user?.name || "";
 
-      // --- ✅ Main query with both duration columns
       const q = `
         SELECT
           c.trainer_name AS "Trainer",
@@ -52,23 +56,20 @@ export default async function handler(req, res) {
 
       const params = role === "admin" ? [from, to] : [from, to, trainerName];
       const result = await pool.query(q, params);
-      const rows = result.rows || [];
 
-      if (!rows.length) {
+      if (!result.rows.length) {
         return res.status(200).json({ message: "No data found for given range." });
       }
 
-      // --- ✅ Convert JSON to CSV
       const parser = new Parser();
-      const csv = parser.parse(rows);
+      const csv = parser.parse(result.rows);
 
-      // --- ✅ Send CSV file
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", `attachment; filename=MockChat_Report_${Date.now()}.csv`);
-      return res.status(200).send(csv);
+      res.status(200).send(csv);
     });
   } catch (err) {
     console.error("Error in /api/reports:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 }
