@@ -6,15 +6,18 @@ import { Parser } from "json2csv";
 const ALLOWED_ORIGIN = "https://mockchat.vercel.app";
 
 export default async function handler(req, res) {
-  // --- ✅ Always send CORS headers
+  // --- ✅ Always send CORS headers (even for OPTIONS)
   res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
-  if (req.method === "OPTIONS") return res.status(200).end();
+  // --- ✅ Handle OPTIONS preflight immediately with HTTP 200
+  if (req.method === "OPTIONS") {
+    return res.status(200).json({ ok: true });
+  }
 
-  // --- ✅ Only GET requests allowed
+  // --- ✅ Restrict to GET only
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -29,7 +32,7 @@ export default async function handler(req, res) {
       const role = req.user?.role || "";
       const trainerName = req.user?.name || "";
 
-      // --- Build SQL Query
+      // --- ✅ Main query with both duration columns
       const q = `
         SELECT
           c.trainer_name AS "Trainer",
@@ -47,7 +50,6 @@ export default async function handler(req, res) {
         ORDER BY c.start_time DESC;
       `;
 
-      // --- Execute query
       const params = role === "admin" ? [from, to] : [from, to, trainerName];
       const result = await pool.query(q, params);
       const rows = result.rows || [];
@@ -56,11 +58,11 @@ export default async function handler(req, res) {
         return res.status(200).json({ message: "No data found for given range." });
       }
 
-      // --- Convert results to CSV
+      // --- ✅ Convert JSON to CSV
       const parser = new Parser();
       const csv = parser.parse(rows);
 
-      // --- Return CSV as downloadable file
+      // --- ✅ Send CSV file
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", `attachment; filename=MockChat_Report_${Date.now()}.csv`);
       return res.status(200).send(csv);
