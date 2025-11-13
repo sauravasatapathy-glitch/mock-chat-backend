@@ -56,6 +56,7 @@ export default async function handler(req, res) {
 
       const q = `
         SELECT
+          c.conv_key AS "Conversation Key",
           c.trainer_name AS "Trainer",
           c.associate_name AS "Agent",
           TO_CHAR(c.start_time, 'YYYY-MM-DD HH24:MI:SS') AS "Start Time",
@@ -67,7 +68,7 @@ export default async function handler(req, res) {
         LEFT JOIN messages m ON m.conv_key = c.conv_key
         WHERE c.start_time BETWEEN $1 AND $2
         ${role === "admin" ? "" : "AND c.trainer_name = $3"}
-        GROUP BY c.trainer_name, c.associate_name, c.start_time, c.end_time
+        GROUP BY c.conv_key, c.trainer_name, c.associate_name, c.start_time, c.end_time
         ORDER BY c.start_time DESC;
       `;
 
@@ -82,12 +83,14 @@ export default async function handler(req, res) {
       // 🔹 Convert to CSV (no dependencies)
       const csv = toCSV(rows);
 
-      res.setHeader("Content-Type", "text/csv");
+      // Optional: UTF-8 BOM for Excel compatibility
+      const bom = "\uFEFF";
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader(
         "Content-Disposition",
         `attachment; filename=MockChat_Report_${Date.now()}.csv`
       );
-      res.status(200).send(csv);
+      res.status(200).send(bom + csv);
     });
   } catch (err) {
     console.error("Error in /api/reports:", err);
