@@ -1,12 +1,21 @@
 // api/reports.js
-
-import { Parser } from "json2csv";
-
 let pool;
 let verifyToken;
-let Parser;
 
 const ALLOWED_ORIGIN = "https://mockchat.vercel.app";
+
+// 🔹 Lightweight CSV converter (dependency-free)
+function toCSV(rows) {
+  if (!rows.length) return "";
+  const headers = Object.keys(rows[0]);
+  const escape = (v) =>
+    `"${String(v ?? "").replace(/"/g, '""').replace(/\n/g, " ")}"`;
+  const csvRows = [headers.join(",")];
+  for (const row of rows) {
+    csvRows.push(headers.map((h) => escape(row[h])).join(","));
+  }
+  return csvRows.join("\n");
+}
 
 export default async function handler(req, res) {
   // --- ✅ Always return CORS headers
@@ -15,19 +24,17 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
-  // --- ✅ Handle preflight immediately (do NOT import anything yet)
+  // --- ✅ Handle preflight immediately (no imports yet)
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
 
-  // --- ✅ Import heavy modules only when needed (avoid early crashes)
+  // --- ✅ Import heavy modules only when needed
   try {
     const { default: p } = await import("../lib/db.js");
     const { verifyToken: vt } = await import("../lib/auth.js");
-    const { Parser: parserClass } = await import("json2csv");
     pool = p;
     verifyToken = vt;
-    Parser = parserClass;
   } catch (err) {
     console.error("Module import error:", err);
     return res.status(500).json({ error: "Internal import error: " + err.message });
@@ -72,11 +79,14 @@ export default async function handler(req, res) {
         return res.status(200).json({ message: "No data found for the given range." });
       }
 
-      const parser = new Parser();
-      const csv = parser.parse(rows);
+      // 🔹 Convert to CSV (no dependencies)
+      const csv = toCSV(rows);
 
       res.setHeader("Content-Type", "text/csv");
-      res.setHeader("Content-Disposition", `attachment; filename=MockChat_Report_${Date.now()}.csv`);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename=MockChat_Report_${Date.now()}.csv`
+      );
       res.status(200).send(csv);
     });
   } catch (err) {
