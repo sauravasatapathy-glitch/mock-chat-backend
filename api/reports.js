@@ -1,32 +1,42 @@
 // api/reports.js
-import pool from "../lib/db.js";
-import { verifyToken } from "../lib/auth.js";
-import { Parser } from "json2csv";
+let pool;
+let verifyToken;
+let Parser;
 
 const ALLOWED_ORIGIN = "https://mockchat.vercel.app";
 
 export default async function handler(req, res) {
-  // --- ✅ Always return CORS headers for every request
+  // --- ✅ Always return CORS headers
   res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
-  // --- ✅ Handle preflight requests cleanly
+  // --- ✅ Handle preflight immediately (do NOT import anything yet)
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
 
-  // --- ✅ Allow only GET
+  // --- ✅ Import heavy modules only when needed (avoid early crashes)
+  try {
+    const { default: p } = await import("../lib/db.js");
+    const { verifyToken: vt } = await import("../lib/auth.js");
+    const { Parser: parserClass } = await import("json2csv");
+    pool = p;
+    verifyToken = vt;
+    Parser = parserClass;
+  } catch (err) {
+    console.error("Module import error:", err);
+    return res.status(500).json({ error: "Internal import error: " + err.message });
+  }
+
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    // ✅ Verify token first (same as conversations.js)
     return verifyToken(req, res, async () => {
       const { from, to } = req.query || {};
-
       if (!from || !to) {
         return res.status(400).json({ error: "Missing 'from' or 'to' parameters" });
       }
@@ -34,7 +44,6 @@ export default async function handler(req, res) {
       const role = req.user?.role || "";
       const trainerName = req.user?.name || "";
 
-      // ✅ Query to calculate durations & message count
       const q = `
         SELECT
           c.trainer_name AS "Trainer",
@@ -60,17 +69,15 @@ export default async function handler(req, res) {
         return res.status(200).json({ message: "No data found for the given range." });
       }
 
-      // ✅ Convert result to CSV
       const parser = new Parser();
       const csv = parser.parse(rows);
 
-      // ✅ Send CSV as downloadable file
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", `attachment; filename=MockChat_Report_${Date.now()}.csv`);
-      return res.status(200).send(csv);
+      res.status(200).send(csv);
     });
   } catch (err) {
     console.error("Error in /api/reports:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 }
