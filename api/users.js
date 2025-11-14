@@ -80,7 +80,7 @@ export default async function handler(req, res) {
         // Send invitation email
         const setPasswordUrl = `https://mockchat.vercel.app/set-password.html?email=${encodeURIComponent(email)}`;
         await Resend.emails.send({
-          from: "MockChat <no-reply@mockchat.app>",
+          from: "MockChat <onboarding@resend.dev>",
           to: email,
           subject: "Welcome to MockChat - Set Your Password",
           html: `
