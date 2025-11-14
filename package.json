@@ -11,8 +11,10 @@
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.11.3"
+    "resend": "^3.2.0"
   },
   "engines": {
     "node": "20.x"
   }
 }
+
